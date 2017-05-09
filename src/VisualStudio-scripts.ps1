@@ -21,6 +21,13 @@ class Env : System.Collections.Generic.Dictionary[string,string] {
     hidden static [Env] $_Default;
 
     Env() {}
+    Env([Env] $Other) {
+        if ($Other) {
+            foreach ($local:Entry in $Other.GetEnumerator()) {
+                $this[$local:Entry.Key] = $Other[$local:Entry.Value];
+            }
+        }
+    }
 
     static [Env] GetDefault() {
         if ([Env]::_Default -eq $null) {
@@ -162,7 +169,7 @@ class Diff : System.Collections.Generic.Dictionary[string,psobject] {
         foreach ($local:Entry in $NewEnv.GetEnumerator()) {
             $local:Key = $local:Entry.Key;
             $local:Value = $local:Entry.Value;
-            $local:OldValue = $OldEnv.Data[$local:Key];
+            $local:OldValue = $OldEnv[$local:Key];
             if ($local:Value -ne $local:OldValue) {
                 if ($local:Key -ieq "Path") {
                     $local:Value = [PathsDiff]::DiffBetween($local:OldValue, $local:Value);
@@ -181,7 +188,7 @@ class Diff : System.Collections.Generic.Dictionary[string,psobject] {
 
     [void] set_Item([string] $Key, [psobject] $Value) {
         if (-not $this.ValidateKeyValue($Key, $Value)) { return; }
-        [void](([System.Collections.Generic.Dictionary[string, psobject]]$this).set_Item($Key, $Value));
+        ([System.Collections.Generic.Dictionary[string, psobject]]$this)[$Key] = $Value;
     }
 
     [void] Add([string] $Key, [psobject] $Value) {
@@ -190,20 +197,21 @@ class Diff : System.Collections.Generic.Dictionary[string,psobject] {
     }
 
     [Env] Apply([Env]$Env) {
-        $local:Data = [hashtable]$Env.Data.Clone();
-        foreach ($local:Key in $this.Changes.Keys) {
-            $local:Value = $this.Changes[$local:Key];
+        [Env] $local:NewEnv = [Env]::new($Env);
+        foreach ($local:Entry in $this.GetEnumerator()) {
+            $local:Key = $local:Entry.Key;
+            $local:Value = $local:Entry.Value;
             if ($local:Value -is [PathsDiff]) {
-                $local:Value = $local:Value.Apply($local:Data[$local:Key]);
+                $local:Value = $local:Value.Apply($local:NewEnv[$local:Key]);
             }
             if ($local:Value) {
-                $local:Data[$local:Key] = $local:Value;
+                $local:NewEnv[$local:Key] = $local:Value;
             }
             else {
-                $local:Data.Remove($local:Key);
+                $local:NewEnv.Remove($local:Key);
             }
         }
-        return [Env]::new($local:Data);
+        return $local:NewEnv;
     }
 
     hidden [bool] ValidateKeyValue([string] $Key, [psobject] $Value) {
