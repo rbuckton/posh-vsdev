@@ -21,10 +21,11 @@ class Env : System.Collections.Generic.Dictionary[string,string] {
     hidden static [Env] $_Default;
 
     Env() {}
-    Env([Env] $Other) {
+
+    hidden Env([Env] $Other) {
         if ($Other) {
             foreach ($local:Entry in $Other.GetEnumerator()) {
-                $this[$local:Entry.Key] = $Other[$local:Entry.Value];
+                $this[$local:Entry.Key] = $local:Entry.Value;
             }
         }
     }
@@ -62,6 +63,23 @@ class Env : System.Collections.Generic.Dictionary[string,string] {
             script:SetEnvironmentVariable $local:Item.Key $local:Item.Value;
         }
     }
+
+    [void] Apply2() {
+        [void]([Env]::GetDefault());
+        $local:Current = [Env]::GetCurrent();
+        foreach ($local:Item in $local:Current.GetEnumerator()) {
+            if (-not $this.ContainsKey($local:Item.Key)) {
+                script:SetEnvironmentVariable $local:Item.Key $null -Test;
+            }
+        }
+        foreach ($local:Item in $this.GetEnumerator()) {
+            script:SetEnvironmentVariable $local:Item.Key $local:Item.Value -Test;
+        }
+    }
+
+    [Env] Clone() {
+        return [Env]::new($this);
+    }
 }
 
 class PathsDiff {
@@ -69,7 +87,7 @@ class PathsDiff {
     hidden [string[]] $Removed;
     hidden [Set] $RemovedSet;
 
-    PathsDiff([string[]] $Added, [string[]] $Removed) {
+    hidden PathsDiff([string[]] $Added, [string[]] $Removed) {
         $this.Added = @() + $Added;
         $this.Removed = @() + $Removed;
         $this.RemovedSet = [Set]::new($Removed);
@@ -115,19 +133,44 @@ class PathsDiff {
         return $this.ApplyToPaths($Paths);
     }
 
+    [PathsDiff] Clone() {
+        return [PathsDiff]::new(
+            $this.Added,
+            $this.Removed
+        );
+    }
+
     hidden [string[]] ApplyToPaths([string[]] $Paths) {
         $local:Result = @();
         foreach ($local:Path in $Paths) {
-            if (-not $this.RemovedSet.Contains($local:Path)) {
+            if ($local:Path -and $local:Path.Trim() -and -not $this.RemovedSet.Contains($local:Path)) {
                 $local:Result += $local:Path;
             }
         }
-        return $local:Result + $this.Added;
+        foreach ($local:Path in $this.Added) {
+            if ($local:Path -and $local:Path.Trim()) {
+                $local:Result += $local:Path;
+            }
+        }
+        return $local:Result;
     }
 }
 
 class Diff : System.Collections.Generic.Dictionary[string,psobject] {
     Diff() { }
+
+    hidden Diff([Diff] $Other) {
+        if ($Other) {
+            foreach ($local:Entry in $Other.GetEnumerator()) {
+                $local:Key = $local:Entry.Key;
+                $local:Value = $local:Entry.Value;
+                if ($local:Key -ieq "Path" -and $local:Value -is [PathsDiff]) {
+                    $local:Value = $local:Value.Clone();
+                }
+                $this[$local:Key] = $local:Value;
+            }
+        }
+    }
 
     static [Diff] FromObject([psobject] $Object) {
         if ($Object -eq $null) { return $null; }
@@ -197,12 +240,12 @@ class Diff : System.Collections.Generic.Dictionary[string,psobject] {
     }
 
     [Env] Apply([Env]$Env) {
-        [Env] $local:NewEnv = [Env]::new($Env);
+        [Env] $local:NewEnv = $Env.Clone();
         foreach ($local:Entry in $this.GetEnumerator()) {
             $local:Key = $local:Entry.Key;
             $local:Value = $local:Entry.Value;
             if ($local:Value -is [PathsDiff]) {
-                $local:Value = $local:Value.Apply($local:NewEnv[$local:Key]);
+                $local:Value = $local:Value.Apply($Env[$local:Key]);
             }
             if ($local:Value) {
                 $local:NewEnv[$local:Key] = $local:Value;
@@ -212,6 +255,10 @@ class Diff : System.Collections.Generic.Dictionary[string,psobject] {
             }
         }
         return $local:NewEnv;
+    }
+
+    [Diff] Clone() {
+        return [Diff]::new($this);
     }
 
     hidden [bool] ValidateKeyValue([string] $Key, [psobject] $Value) {
@@ -231,17 +278,25 @@ class Instance {
     [string] $Name;
     [string] $Channel;
     [string] $Version;
-    [string] $BasePath;
-    [string] $CommandPath;
+    [string] $Path;
     hidden [Diff] $Env;
 
-    Instance([string] $Name, [string] $Channel, [string] $Version, [string] $BasePath, [string] $CommandPath, [Diff] $Env) {
+    Instance([string] $Name, [string] $Channel, [string] $Version, [string] $Path, [Diff] $Env) {
         $this.Name = $Name;
         $this.Channel = $Channel;
         $this.Version = $Version;
-        $this.BasePath = $BasePath;
-        $this.CommandPath = $CommandPath;
+        $this.Path = $Path;
         $this.Env = $Env;
+    }
+
+    hidden Instance([Instance] $Other) {
+        if ($Other) {
+            $this.Name = $Other.Name;
+            $this.Channel = $Other.Channel;
+            $this.Version = $Other.Version;
+            $this.Path = $Other.Path;
+            $this.Env = if ($Other.Env) { $Other.Env.Clone(); }
+        }
     }
 
     static [Instance] FromObject([psobject] $Object) {
@@ -251,8 +306,7 @@ class Instance {
             $Object.Name,
             $Object.Channel,
             $Object.Version,
-            $Object.BasePath,
-            $Object.CommandPath,
+            $Object.Path,
             [Diff]::FromObject($Object.Env)
         );
     }
@@ -263,8 +317,7 @@ class Instance {
             Name = $Object.Name;
             Channel = $Object.Channel;
             Version = $Object.Version;
-            BasePath = $Object.BasePath;
-            CommandPath = $Object.CommandPath;
+            Path = $Object.Path;
             Env = [Diff]::ToObject($Object.Env);
         };
     }
@@ -274,8 +327,9 @@ class Instance {
             $local:CurrentEnv = [Env]::GetCurrent();
             $local:DefaultEnvironment = [Env]::GetDefault();
             $local:DefaultEnvironment.Apply();
-            $local:Env = [Env]::new();
-            $local:Command = '"' + ($this.CommandPath) + '"&set';
+            $local:Env = [Env]::GetCurrent();
+            $local:CommandPath = Join-Path $this.Path $script:VSDEVCMD_PATH;
+            $local:Command = '"' + ($local:CommandPath) + '"&set';
             cmd /c $local:Command | ForEach-Object {
                 if ($_ -match "^(.*?)=(.*)$") {
                     $local:Key = $Matches[1];
@@ -283,18 +337,27 @@ class Instance {
                     $local:Env[$local:Key] = $local:Value;
                 }
             }
-            $local:CurrentEnv.Apply();
             $this.Env = [Diff]::DiffBetween($local:DefaultEnvironment, $local:Env);
+            $local:CurrentEnv.Apply();
             $script:HasChanges = $true;
         }
         return $this.Env;
     }
 
     [void] Apply() {
-        $local:Def = [Env]::GetDefault();
+        $local:Default = [Env]::GetDefault();
         $local:Diff = $this.GetEnvironment();
-        $local:Env = $local:Diff.Apply($local:Def);
-        $local:Env.Apply();
+        $local:Env = $local:Diff.Apply($local:Default);
+        $local:Env.Apply2();
+    }
+
+    [Instance] Clone() {
+        return [Instance]::new($this);
+    }
+
+    [void] Save() {
+        $script:HasChanges = $true;
+        script:SaveChanges;
     }
 }
 
@@ -309,12 +372,28 @@ function script:ConvertToHashTable([psobject] $Object) {
     return $local:Table;
 }
 
-function script:SetEnvironmentVariable([string] $Key, [string] $Value) {
+function script:SetEnvironmentVariable([string] $Key, [string] $Value, [switch]$Test) {
     if ($Value -ne $null) {
         [void](Set-Item -Force "ENV:\$Key" -Value $Value);
+        if ($Test) {
+            try {
+                [void](git);
+            }
+            catch {
+                Write-Warning "Failed after setting $Key to $Value";
+            }
+        }
     }
     else {
         [void](Remove-Item -Force "ENV:\$Key");
+        if ($Test) {
+            try {
+                [void](git);
+            }
+            catch {
+                Write-Warning "Failed after removing $Key";
+            }
+        }
     }
 }
 
@@ -340,7 +419,6 @@ function script:PopulateVisualStudioVersions() {
                     "Release",
                     $Matches[1],
                     $_.FullName,
-                    (Join-Path $_.FullName $script:VSDEVCMD_PATH),
                     $null
                 );
             };
@@ -356,7 +434,6 @@ function script:PopulateVisualStudioVersions() {
                         $local:State.channelId,
                         $local:State.installationVersion,
                         $local:State.installationPath,
-                        (Join-Path $local:State.installationPath $script:VSDEVCMD_PATH),
                         $null
                     );
                 };
@@ -365,7 +442,7 @@ function script:PopulateVisualStudioVersions() {
         # Sort by version descending and remove versions that don't exist
         $script:VisualStudioVersions = $script:VisualStudioVersions `
             | Sort-Object -Property Version -Descending `
-            | Where-Object { Test-Path $_.CommandPath };
+            | Where-Object { Test-Path (Join-Path $_.Path $script:VSDEVCMD_PATH) };
 
         if ($script:VisualStudioVersions) {
             $script:HasChanges = $true;
@@ -435,6 +512,7 @@ function Use-VisualStudioEnvironment {
         $local:VisualStudioVersion.Apply();
         script:SaveChanges;
         Write-Output "Using Development Environment from '$($local:VisualStudioVersion.Name)'.";
+        $global:VisualStudioVersion = $local:VisualStudioVersion;
     }
     else {
         [string] $local:Message = "Could not find Visual Studio";
@@ -461,6 +539,7 @@ function Use-VisualStudioEnvironment {
 }
 
 function Reset-VisualStudioEnvironment {
+    $global:VisualStudioVersion = $null;
     [Env]::GetDefault().Apply();
 }
 
