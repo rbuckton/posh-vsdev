@@ -1,5 +1,5 @@
 # Visual Studio Developer Command Prompt for PowerShell
-[![psget](https://img.shields.io/github/release/rbuckton/posh-vsdev.svg?label=psget&colorB=0072c6)](https://www.powershellgallery.com/packages/posh-vsdev/0.1.0)
+[![psget](https://img.shields.io/github/release/rbuckton/posh-vsdev.svg?label=psget&colorB=0072c6)](https://www.powershellgallery.com/packages/posh-vsdev)
 
 This PowerShell module allows you to configure your PowerShell session as a Visual Studio Developer
 Command Prompt by loading the environment variables from the **VsDevCmd.bat** batch file for a
