@@ -31,7 +31,7 @@ Get-VisualStudioVersion
 Get-VisualStudioVersion -Version 14
 
 # Use the Developer Command Prompt Environment
-Use-VisualStudioVersion
+Use-VisualStudioEnvironment
 
 # Restore the non-Developer environment
 Reset-VisualStudioEnvironment
