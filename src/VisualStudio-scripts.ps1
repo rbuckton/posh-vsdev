@@ -1,8 +1,8 @@
 # constants
 $script:VSDEVCMD_PATH = "Common7\Tools\VsDevCmd.bat";
 $script:VS_INSTANCES_DIR = "$env:ProgramData\Microsoft\VisualStudio\Packages\_Instances";
-$script:POSH_VS_CONFIG_DIR = "$env:USERPROFILE\.posh-vs";
-$script:CACHE_PATH = "$script:POSH_VS_CONFIG_DIR\instances.json";
+$script:CONFIG_DIR = "$env:USERPROFILE\.posh-vsdev";
+$script:CACHE_PATH = "$script:CONFIG_DIR\instances.json";
 
 $script:VisualStudioVersions = $null;   # In-memory cache of instances
 $script:HasChanges = $false;            # Indicates whether the in-memory cache has changes
@@ -61,19 +61,6 @@ class Env : System.Collections.Generic.Dictionary[string,string] {
         }
         foreach ($local:Item in $this.GetEnumerator()) {
             script:SetEnvironmentVariable $local:Item.Key $local:Item.Value;
-        }
-    }
-
-    [void] Apply2() {
-        [void]([Env]::GetDefault());
-        $local:Current = [Env]::GetCurrent();
-        foreach ($local:Item in $local:Current.GetEnumerator()) {
-            if (-not $this.ContainsKey($local:Item.Key)) {
-                script:SetEnvironmentVariable $local:Item.Key $null -Test;
-            }
-        }
-        foreach ($local:Item in $this.GetEnumerator()) {
-            script:SetEnvironmentVariable $local:Item.Key $local:Item.Value -Test;
         }
     }
 
@@ -348,7 +335,7 @@ class Instance {
         $local:Default = [Env]::GetDefault();
         $local:Diff = $this.GetEnvironment();
         $local:Env = $local:Diff.Apply($local:Default);
-        $local:Env.Apply2();
+        $local:Env.Apply();
     }
 
     [Instance] Clone() {
@@ -372,28 +359,12 @@ function script:ConvertToHashTable([psobject] $Object) {
     return $local:Table;
 }
 
-function script:SetEnvironmentVariable([string] $Key, [string] $Value, [switch]$Test) {
+function script:SetEnvironmentVariable([string] $Key, [string] $Value) {
     if ($Value -ne $null) {
         [void](Set-Item -Force "ENV:\$Key" -Value $Value);
-        if ($Test) {
-            try {
-                [void](git);
-            }
-            catch {
-                Write-Warning "Failed after setting $Key to $Value";
-            }
-        }
     }
     else {
         [void](Remove-Item -Force "ENV:\$Key");
-        if ($Test) {
-            try {
-                [void](git);
-            }
-            catch {
-                Write-Warning "Failed after removing $Key";
-            }
-        }
     }
 }
 
@@ -511,7 +482,7 @@ function Use-VisualStudioEnvironment {
     if ($local:VisualStudioVersion) {
         $local:VisualStudioVersion.Apply();
         script:SaveChanges;
-        Write-Output "Using Development Environment from '$($local:VisualStudioVersion.Name)'.";
+        Write-Host "Using Development Environment from '$($local:VisualStudioVersion.Name)'." -ForegroundColor:Gray;
         $global:VisualStudioVersion = $local:VisualStudioVersion;
     }
     else {
@@ -559,7 +530,7 @@ function script:HasProfile([string] $ProfilePath) {
 function script:IsInProfile([string] $ProfilePath) {
     if (-not (script:HasProfile $ProfilePath)) { return $false; }
     $local:Content = Get-Content $ProfilePath -ErrorAction:SilentlyContinue;
-    if ($local:Content -match "posh-vs") { return $true; }
+    if ($local:Content -match "posh-vsdev") { return $true; }
     return $false;
 }
 
@@ -593,11 +564,11 @@ function Add-VisualStudioEnvironmentToProfile([switch] $AllHosts, [switch] $UseE
     $local:IsInProfile = script:IsInProfile $local:ProfilePath;
     $local:IsUsingEnvironment = script:IsUsingEnvironment $local:ProfilePath;
     if ($local:IsInProfile -and -not $UseEnvironment) {
-        Write-Warning "'posh-vs' is already installed.";
+        Write-Warning "'posh-vsdev' is already installed.";
         return;
     }
     if ($local:IsUsingEnvironment -and $UseEnvironment) {
-        Write-Warning "'posh-vs' is already using a VisualStudio environment.";
+        Write-Warning "'posh-vsdev' is already using a VisualStudio environment.";
         return;
     }
     if (script:IsProfileSigned $local:ProfilePath) {
@@ -612,10 +583,10 @@ function Add-VisualStudioEnvironmentToProfile([switch] $AllHosts, [switch] $UseE
             }
         }
         if (script:IsInModulePaths) {
-            Add-Content -LiteralPath:$local:ProfilePath -Value "Import-Module posh-vs;" -Encoding UTF8;
+            Add-Content -LiteralPath:$local:ProfilePath -Value "Import-Module posh-vsdev;" -Encoding UTF8;
         }
         else {
-            Add-Content -LiteralPath:$local:ProfilePath -Value "Import-Module `"$PSScriptRoot\posh-vs.psd1`";" -Encoding UTF8;
+            Add-Content -LiteralPath:$local:ProfilePath -Value "Import-Module `"$PSScriptRoot\posh-vsdev.psd1`";" -Encoding UTF8;
         }
     }
     if (-not $local:IsUsingEnvironment -and $UseEnvironment) {

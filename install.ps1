@@ -1,2 +1,2 @@
-Import-Module $PSScriptRoot\src\posh-vs.psd1;
+Import-Module $PSScriptRoot\src\posh-vsdev.psd1;
 Add-VisualStudioEnvironmentToProfile;

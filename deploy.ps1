@@ -1,8 +1,8 @@
 param([switch] $Force);
 
-$script:ModuleInfo = Get-Module src\posh-vs.psd1 -ListAvailable;
+$script:ModuleInfo = Get-Module src\posh-vsdev.psd1 -ListAvailable;
 if (-not $script:ModuleInfo) {
-    Write-Warning "Could not find src\posh-vs.psd1";
+    Write-Warning "Could not find src\posh-vsdev.psd1";
     return;
 }
 

@@ -1,6 +1,6 @@
 @{
     # Script module or binary module file associated with this manifest.
-    ModuleToProcess = 'posh-vs.psm1'
+    RootModule = 'posh-vsdev.psm1'
 
     # Version number of this module.
     ModuleVersion = '0.1.0'
@@ -44,13 +44,13 @@
 
         PSData = @{
             # Tags applied to this module. These help with module discovery in online galleries.
-            Tags = @('visual studio', 'vs', 'developer')
+            Tags = @('visualstudio', 'visual', 'studio', 'vs', 'developer')
 
             # A URL to the license for this module.
-            LicenseUri = 'https://github.com/rbuckton/posh-vs/blob/master/LICENSE'
+            LicenseUri = 'https://github.com/rbuckton/posh-vsdev/blob/master/LICENSE'
 
             # A URL to the main website for this project.
-            ProjectUri = 'https://github.com/rbuckton/posh-vs'
+            ProjectUri = 'https://github.com/rbuckton/posh-vsdev'
         }
     }
 }
