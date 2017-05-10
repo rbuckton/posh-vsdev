@@ -1,43 +1,44 @@
 # Visual Studio Developer Command Prompt for PowerShell
+[![psget](https://img.shields.io/github/release/rbuckton/posh-vsdev.svg?label=psget&colorB=0072c6)](https://www.powershellgallery.com/packages/posh-vsdev/0.1.0)
+
 This PowerShell module allows you to configure your PowerShell session as a Visual Studio Developer
 Command Prompt by loading the environment variables from the **VsDevCmd.bat** batch file for a
 specified Visual Studio version.
 
 # Installation
 
+> NOTE: `posh-vsdev` requires PowerShell 5.0 or higher.
+
+### Inspect
 ```powershell
-# clone the repository
-git clone https://github.com/rbuckton/posh-vs.git;
+PS> Save-Module -Name posh-vsdev
+```
 
-# Option 1 - Deploy to $env:USERPROFILE\Documents\WindowsPowerShell\Modules
-./posh-vs/deploy.ps1;
-Import-Module posh-vs;
-
-# Option 2 - Run locally
-./posh-vs/install.ps1;
+### Install
+```powershell
+PS> Install-Module -Name posh-vsdev -Scope CurrentUser
 ```
 
 # Usage
-
 ```powershell
-# Get all supported installed Visual Studio instances
+# Import the posh-vsdev module module
+Import-Module posh-vsdev
+
+# Get all installed Visual Studio instances
 Get-VisualStudioVersion
 
 # Get a specific version
 Get-VisualStudioVersion -Version 14
 
-# Get a version by release channel
-Get-VisualStudioVersion -Channel VisualStudio.15.Release
-
 # Use the Developer Command Prompt Environment
 Use-VisualStudioVersion
 
-# Restore previous environment variables
+# Restore the non-Developer environment
 Reset-VisualStudioEnvironment
 
 # Reset cache of Visual Studio instances
 Reset-VisualStudioVersionCache
 
-# Add posh-vs to your profile for the current PowerShell host
+# Add posh-vsdev to your PowerShell profile
 Add-VisualStudioEnvironmentToProfile -UseEnvironment
 ```

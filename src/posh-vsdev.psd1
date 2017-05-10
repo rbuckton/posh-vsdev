@@ -3,7 +3,7 @@
     RootModule = 'posh-vsdev.psm1'
 
     # Version number of this module.
-    ModuleVersion = '0.1.0'
+    ModuleVersion = '0.1.1'
 
     # ID used to uniquely identify this module
     GUID = '796b8bb3-07d8-41b0-8394-231f8359c7a6'
@@ -33,7 +33,9 @@
     CmdletsToExport = @()
 
     # Variables to export from this module
-    VariablesToExport = @()
+    VariablesToExport = @(
+        'VisualStudioVersion'
+    )
 
     # Aliases to export from this module
     AliasesToExport = @()
@@ -41,7 +43,6 @@
     # Private data to pass to the module specified in RootModule/ModuleToProcess.
     # This may also contain a PSData hashtable with additional module metadata used by PowerShell.
     PrivateData = @{
-
         PSData = @{
             # Tags applied to this module. These help with module discovery in online galleries.
             Tags = @('visualstudio', 'visual', 'studio', 'vs', 'developer')
