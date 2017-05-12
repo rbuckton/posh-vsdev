@@ -233,11 +233,11 @@ class EnvironmentDiff : System.Collections.Generic.Dictionary[string,psobject] {
 class VisualStudioInstance {
     [string] $Name;
     [string] $Channel;
-    [string] $Version;
+    [version] $Version;
     [string] $Path;
     hidden [EnvironmentDiff] $Env;
 
-    VisualStudioInstance([string] $Name, [string] $Channel, [string] $Version, [string] $Path, [EnvironmentDiff] $Env) {
+    VisualStudioInstance([string] $Name, [string] $Channel, [version] $Version, [string] $Path, [EnvironmentDiff] $Env) {
         $this.Name = $Name;
         $this.Channel = $Channel;
         $this.Version = $Version;
@@ -251,7 +251,7 @@ class VisualStudioInstance {
         return [VisualStudioInstance]::new(
             $Object.Name,
             $Object.Channel,
-            $Object.Version,
+            $Object.Version -as [version],
             $Object.Path,
             [EnvironmentDiff]::FromObject($Object.Env)
         );
@@ -262,7 +262,7 @@ class VisualStudioInstance {
         return @{
             Name = $Object.Name;
             Channel = $Object.Channel;
-            Version = $Object.Version;
+            Version = $Object.Version -as [string];
             Path = $Object.Path;
             Env = [EnvironmentDiff]::ToObject($Object.Env);
         };
@@ -300,6 +300,306 @@ class VisualStudioInstance {
     }
 }
 
+$script:OperatorPattern = "(?<Operator>[<>=^~]|<=|>=)?";
+$script:RevisionPattern = "(?:\.(?<Revision>[*x]|\d+))?";
+$script:BuildPattern = "(?:\.(?:(?<Build>[*x])|(?<Build>\d+)$script:RevisionPattern))?";
+$script:MinorPattern = "(?:\.(?:(?<Minor>[*x])|(?<Minor>\d+)$script:BuildPattern))?";
+$script:MajorPattern = "(?:(?<Major>[*x])|${script:OperatorPattern}v?(?<Major>\d+)$script:MinorPattern)";
+$script:VersionSpecPattern = "^\s*(?:${script:MajorPattern})?\s*$";
+
+enum VersionRangeOperator {
+    None = 0;
+    Or = 1;
+}
+
+enum VersionComparisonOperator {
+    None = 0;
+    Equal = 1;
+    LessThan = 2;
+    GreaterThan = 3;
+    LessThanOrEqual = 4;
+    GreaterThanOrEqual = 5;
+    Tilde = 6;
+    Caret = 7;
+}
+
+class VersionFragment {
+    static [VersionRangeFragment] Range([VersionFragment] $Left, [VersionFragment] $Right) {
+        return [VersionRangeFragment]::new([VersionRangeOperator]::None, $Left, $Right);
+    }
+
+    static [VersionRangeFragment] Or([VersionFragment] $Left, [VersionFragment] $Right) {
+        return [VersionRangeFragment]::new([VersionRangeOperator]::Or, $Left, $Right);
+    }
+
+    static [VersionPrimitiveFragment] Primitive([int] $Major, [int] $Minor, [int] $Build, [int] $Revision) {
+        return VersionPrimitiveFragment::new([VersionComparisonOperator]::None, $Major, $Minor, $Build, $Revision);
+    }
+
+    static [VersionPrimitiveFragment] EQ([int] $Major, [int] $Minor, [int] $Build, [int] $Revision) {
+        return VersionPrimitiveFragment::new([VersionComparisonOperator]::Equal, $Major, $Minor, $Build, $Revision);
+    }
+
+    static [VersionPrimitiveFragment] LT([int] $Major, [int] $Minor, [int] $Build, [int] $Revision) {
+        return VersionPrimitiveFragment::new([VersionComparisonOperator]::LessThan, $Major, $Minor, $Build, $Revision);
+    }
+
+    static [VersionPrimitiveFragment] LE([int] $Major, [int] $Minor, [int] $Build, [int] $Revision) {
+        return VersionPrimitiveFragment::new([VersionComparisonOperator]::LessThanOrEqual, $Major, $Minor, $Build, $Revision);
+    }
+
+    static [VersionPrimitiveFragment] GT([int] $Major, [int] $Minor, [int] $Build, [int] $Revision) {
+        return VersionPrimitiveFragment::new([VersionComparisonOperator]::GreaterThan, $Major, $Minor, $Build, $Revision);
+    }
+
+    static [VersionPrimitiveFragment] GE([int] $Major, [int] $Minor, [int] $Build, [int] $Revision) {
+        return VersionPrimitiveFragment::new([VersionComparisonOperator]::GreaterThanOrEqual, $Major, $Minor, $Build, $Revision);
+    }
+
+    hidden [VersionFragment] Normalize() {
+        return $this;
+    }
+
+    [bool] IsMatch([Version] $Version) {
+        return $false;
+    }
+}
+
+class VersionRangeFragment : VersionFragment {
+    [VersionRangeOperator] $Operator;
+    [VersionFragment] $Left;
+    [VersionFragment] $Right;
+
+    VersionRangeFragment([VersionRangeOperator] $Operator, [VersionFragment] $Left, [VersionFragment] $Right) {
+        $this.Operator = $Operator;
+        $this.Left = $Left;
+        $this.Right = $Right;
+    }
+
+    hidden [VersionFragment] Normalize() {
+        $local:Left = $this.Left.Normalize();
+        $local:Right = $this.Right.Normalize();
+        if ($this.Left -ne $local:Left -or $this.Right -ne $local:Right) {
+            return [VersionRangeFragment]::new($local:Left, $local:Right);
+        }
+        return $this;
+    }
+
+    [bool] IsMatch([Version] $Version) {
+        if ($this.Operator -eq [VersionRangeOperator]::None) {
+            return $this.Left.IsMatch($Version) -and $this.Right.IsMatch($Version);
+        }
+        else {
+            return $this.Left.IsMatch($Version) -or $this.Right.IsMatch($Version);
+        }
+    }
+
+    [string] ToString() {
+        if ($this.Operator -eq [VersionRangeOperator]::None) {
+            return "$($this.Left) $($this.Right)";
+        }
+        else {
+            return "$($this.Left) || $($this.Right)";
+        }
+    }
+}
+
+class VersionPrimitiveFragment : VersionFragment {
+    [VersionComparisonOperator] $Operator = [VersionComparisonOperator]::GreaterThanOrEqual;
+    [int] $Major = 0;
+    [int] $Minor = 0;
+    [int] $Build = 0;
+    [int] $Revision = 0;
+
+    hidden VersionPrimitiveFragment([VersionComparisonOperator] $Operator, [int] $Major, [int] $Minor, [int] $Build, [int] $Revision) {
+        $this.Operator = $Operator;
+        $this.Major = $Major;
+        $this.Minor = $Minor;
+        $this.Build = $Build;
+        $this.Revision = $Revision;
+    }
+
+    hidden [VersionFragment] Normalize() {
+        if ($this.Operator -eq [VersionComparisonOperator]::None) {
+            if ($this.Major -eq [VersionSpec]::VERSION_FRAGMENT_STAR -or
+                $this.Major -eq [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED) {
+                return [VersionPrimitiveFragment]::GE(0, 0, 0, 0);
+            }
+            if ($this.Minor -eq [VersionSpec]::VERSION_FRAGMENT_STAR -or
+                $this.Minor -eq [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED) {
+                return [VersionFragment]::Range(
+                    [VersionFragment]::GE($this.Major, 0, 0, 0),
+                    [VersionFragment]::LT($this.Major + 1, 0, 0, 0)
+                );
+            }
+            if ($this.Build -eq [VersionSpec]::VERSION_FRAGMENT_STAR -or
+                $this.Build -eq [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED) {
+                return [VersionFragment]::Range(
+                    [VersionFragment]::GE($this.Major, $this.Minor, 0, 0),
+                    [VersionFragment]::LT($this.Major, $this.Minor + 1, 0, 0)
+                );
+            }
+            if ($this.Revision -eq [VersionSpec]::VERSION_FRAGMENT_STAR -or
+                $this.Revision -eq [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED) {
+                return [VersionFragment]::Range(
+                    [VersionFragment]::GE($this.Major, $this.Minor, $this.Build, 0),
+                    [VersionFragment]::LT($this.Major, $this.Minor, $this.Build + 1, 0)
+                );
+            }
+        }
+        elseif ($this.Operator -eq [VersionComparisonOperator]::Tilde) {
+            if ($this.Revision -ne [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED) {
+                return [VersionFragment]::Range(
+                    [VersionFragment]::GE($this.Major, $this.Minor, $this.Build, $this.Revision),
+                    [VersionFragment]::LT($this.Major, $this.Minor, $this.Build + 1, 0)
+                );
+            }
+            if ($this.Build -ne [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED) {
+                return [VersionFragment]::Range(
+                    [VersionFragment]::GE($this.Major, $this.Minor, $this.Build, 0),
+                    [VersionFragment]::LT($this.Major, $this.Minor + 1, 0, 0)
+                );
+            }
+            if ($this.Minor -ne [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED) {
+                return [VersionFragment]::Range(
+                    [VersionFragment]::GE($this.Major, $this.Minor, 0, 0),
+                    [VersionFragment]::LT($this.Major + 1, 0, 0, 0)
+                );
+            }
+        }
+        elseif ($this.Operator -eq [VersionComparisonOperator]::Caret) {
+            if ($this.Major -gt 0) {
+                return [VersionFragment]::Range(
+                    [VersionFragment]::GE($this.Major, [Math]::Max(0, $this.Minor), [Math]::Max($this.Build, 0), [Math]::Max($this.Revision, 0)),
+                    [VersionFragment]::LT($this.Major + 1, 0, 0, 0)
+                );
+            }
+            if ($this.Minor -gt 0) {
+                return [VersionFragment]::Range(
+                    [VersionFragment]::GE(0, $this.Minor, [Math]::Max($this.Build, 0), [Math]::Max($this.Revision, 0)),
+                    [VersionFragment]::LT(0, $this.Minor + 1, 0, 0)
+                );
+            }
+            if ($this.Minor -lt 0) {
+                return [VersionFragment]::Range(
+                    [VersionFragment]::GE(0, 0, 0, 0),
+                    [VersionFragment]::LT(1, 0, 0, 0)
+                );
+            }
+            if ($this.Build -gt 0) {
+                return [VersionFragment]::Range(
+                    [VersionFragment]::GE(0, 0, $this.Build, [Math]::Max($this.Revision, 0)),
+                    [VersionFragment]::LT(0, 0, $this.Build + 1, 0)
+                );
+            }
+            if ($this.Build -lt 0) {
+                return [VersionFragment]::Range(
+                    [VersionFragment]::GE(0, 0, 0, 0),
+                    [VersionFragment]::LT(0, 1, 0, 0)
+                );
+            }
+            if ($this.Revision -gt 0) {
+                return [VersionFragment]::Range(
+                    [VersionFragment]::GE(0, 0, 0, $this.Revision),
+                    [VersionFragment]::LT(0, 0, 0, $this.Revision + 1)
+                );
+            }
+            if ($this.Revision -lt 0) {
+                return [VersionFragment]::Range(
+                    [VersionFragment]::GE(0, 0, 0, 0),
+                    [VersionFragment]::LT(0, 0, 1, 0)
+                );
+            }
+        }
+        return $this;
+    }
+
+    [bool] IsMatch([Version] $Version) {
+        return $false;
+    }
+}
+
+class VersionSpec {
+    hidden static $VERSION_FRAGMENT_UNSPECIFIED = -1;
+    hidden static $VERSION_FRAGMENT_STAR = -2;
+    hidden static $VERSION_OPERATORS = @{
+        ""   = [VersionComparisonOperator]::None;
+        "="  = [VersionComparisonOperator]::Equal;
+        "<"  = [VersionComparisonOperator]::LessThan;
+        "<=" = [VersionComparisonOperator]::LessThanOrEqual;
+        ">"  = [VersionComparisonOperator]::GreaterThan;
+        ">=" = [VersionComparisonOperator]::GreaterThanOrEqual;
+        "~"  = [VersionComparisonOperator]::Tilde;
+        "^"  = [VersionComparisonOperator]::Caret;
+    };
+
+    hidden [VersionFragment] $Spec;
+
+    static [bool] TryParse([string] $Text, [ref[VersionSpec]] $Value) {
+        $Value = $null;
+        return $false;
+    }
+
+    hidden static [bool] TryParsePrimitive([string] $Text, [ref[VersionPrimitiveFragment]] $Value) {
+        [int] $local:Major = [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED;
+        [int] $local:Minor = [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED;
+        [int] $local:Build = [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED;
+        [int] $local:Revision = [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED;
+        if (-not $Text -imatch $script:VersionSpecPattern -or
+            -not ([VersionSpec]::TryParseXr($Matches.Major, [ref]$local:Major)) -or
+            -not ([VersionSpec]::TryParseXr($Matches.Minor, [ref]$local:Minor)) -or
+            -not ([VersionSpec]::TryParseXr($Matches.Build, [ref]$local:Build)) -or
+            -not ([VersionSpec]::TryParseXr($Matches.Revision, [ref]$local:Revision))) {
+            $Value = $null;
+            return $false;
+        }
+
+        [VersionComparisonOperator] $local:Operator = [VersionSpec]::VERSION_OPERATORS[$Matches.Operator];
+        if ($local:Operator -ne [VersionComparisonOperator]::None) {
+            if ($local:Major -eq [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED -or
+                $local:Major -eq [VersionSpec]::VERSION_FRAGMENT_STAR -or
+                $local:Minor -eq [VersionSpec]::VERSION_FRAGMENT_STAR -or
+                $local:Build -eq [VersionSpec]::VERSION_FRAGMENT_STAR -or
+                $local:Revision -eq [VersionSpec]::VERSION_FRAGMENT_STAR) {
+                $Value = $null;
+                return $false;
+            }
+        }
+
+        $Value = [VersionPrimitiveFragment]::new();
+        $Value.Operator = $local:Operator;
+        $Value.Major = $local:Major;
+        $Value.Minor = $local:Minor;
+        $Value.Build = $local:Build;
+        $Value.Revision = $local:Revision;
+        return $true;
+    }
+
+    hidden static [bool] TryParseXr([string] $Text, [ref[int]] $Value) {
+        if ($Text.Length -eq 0) {
+            $Value = [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED;
+            return $true;
+        }
+        if ($Text.Length -eq 1 -and ($Text -eq '*' -or $Text -eq 'x' -or $Text -eq 'X')) {
+            $Value = [VersionSpec]::VERSION_FRAGMENT_STAR;
+            return $true;
+        }
+        if ([int]::TryParse($Text, [ref] $Value) -and $Value -ge 0) {
+            return $true;
+        }
+        $Value = 0;
+        return $false;
+    }
+
+    [bool] IsMatch([version] $Version) {
+        return $this.Spec.IsMatch($Version);
+    }
+
+    [string] ToString() {
+        return $this.Spec.ToString();
+    }
+}
+
 # Converts a JSON object (from ConvertFrom-Json) into a Hashtable
 function script:ConvertToHashTable([psobject] $Object) {
     if ($Object -eq $null) { return $null; }
@@ -334,42 +634,69 @@ function script:PopulateVisualStudioVersionsFromCache() {
     }
 }
 
+# Gets the installed legacy visual studio instances from the registry
+function script:GetLegacyVisualStudioInstancesFromRegistry() {
+    Get-ChildItem HKCU:\Software\Microsoft\VisualStudio\*.0 -PipelineVariable:ProductKey `
+        | ForEach-Object { Join-Path $local:ProductKey.PSParentPath ($local:ProductKey.PSChildName + "_Config") | Get-Item -ErrorAction:SilentlyContinue; } -PipelineVariable:ConfigKey `
+        | ForEach-Object { Join-Path $local:ProductKey.PSPath Profile | Get-Item -ErrorAction:SilentlyContinue } -PipelineVariable:ProfileKey `
+        | ForEach-Object {
+            $local:Version = $local:ProfileKey | Get-ItemPropertyValue -Name BuildNum;
+            $local:Path = $local:ConfigKey | Get-ItemPropertyValue -Name ShellFolder;
+            $local:Name = "VisualStudio/$local:Version";
+            if (Join-Path $local:Path $script:VSDEVCMD_PATH | Test-Path) {
+                [VisualStudioInstance]::new(
+                    $local:Name,
+                    "Release",
+                    $local:Version -as [version],
+                    $local:Path,
+                    $null
+                );
+            }
+        };
+}
+
+# Gets the installed visual studio instances from the VS instances directory
+function script:GetVisualStudioInstancesFromVSInstancesDir() {
+    Get-ChildItem $script:VS_INSTANCES_DIR `
+        | ForEach-Object {
+            $local:StatePath = Join-Path $_.FullName "state.json";
+            $local:State = Get-Content $local:StatePath | ConvertFrom-Json;
+            if (Join-Path $local:State.installationPath $script:VSDEVCMD_PATH | Test-Path) {
+                # other interesting data:
+                # $local:State.installDate
+                # $local:State.catalogInfo.buildBranch
+                # $local:State.catalogInfo.productDisplayVersion
+                # $local:State.catalogInfo.productSemanticVersion
+                # $local:State.catalogInfo.productLineVersion
+                # $local:State.catalogInfo.productMilestone
+                # $local:State.catalogInfo.productMilestoneIsPreRelease
+                # $local:State.catalogInfo.productName
+                # $local:State.catalogInfo.productPatchVersion
+                # $local:State.catalogInfo.productRelease
+                # $local:State.catalogInfo.channelUri
+                # $local:State.launchParams.fileName
+                [VisualStudioInstance]::new(
+                    $local:State.installationName,
+                    $local:State.channelId,
+                    $local:State.installationVersion -as [version],
+                    $local:State.installationPath,
+                    $null
+                );
+            }
+        };
+}
+
+# Gets the installed visual studio instances
+function script:GetVisualStudioInstances() {
+    script:GetLegacyVisualStudioInstancesFromRegistry;
+    script:GetVisualStudioInstancesFromVSInstancesDir;
+}
+
 # Populates $script:VisualStudioVersions from disk if it is empty
 function script:PopulateVisualStudioVersions() {
     if ($script:VisualStudioVersions -eq $null) {
-        # Add Legacy instances
-        $script:VisualStudioVersions = Get-ChildItem ${env:ProgramFiles(x86)} `
-            | Where-Object -Property Name -Match "Microsoft Visual Studio (\d+.0)" `
-            | ForEach-Object {
-                [VisualStudioInstance]::new(
-                    $Matches[0],
-                    "Release",
-                    $Matches[1],
-                    $_.FullName,
-                    $null
-                );
-            };
-
-        # Add Dev15+ instances
-        if (Test-Path $script:VS_INSTANCES_DIR) {
-            $script:VisualStudioVersions += Get-ChildItem $script:VS_INSTANCES_DIR `
-                | ForEach-Object {
-                    $local:StatePath = Join-Path $_.FullName "state.json";
-                    $local:State = Get-Content $local:StatePath | ConvertFrom-Json;
-                    [VisualStudioInstance]::new(
-                        $local:State.installationName,
-                        $local:State.channelId,
-                        $local:State.installationVersion,
-                        $local:State.installationPath,
-                        $null
-                    );
-                };
-        }
-
-        # Sort by version descending and remove versions that don't exist
-        $script:VisualStudioVersions = $script:VisualStudioVersions `
-            | Sort-Object -Property Version -Descending `
-            | Where-Object { Test-Path (Join-Path $_.Path $script:VSDEVCMD_PATH) };
+        $script:VisualStudioVersions = script:GetVisualStudioInstances `
+            | Sort-Object -Property Version -Descending;
 
         if ($script:VisualStudioVersions) {
             $script:HasChanges = $true;
@@ -445,7 +772,7 @@ function script:IsInModulePaths() {
 .SYNOPSIS
     Get installed Visual Studio instances.
 .DESCRIPTION
-    The Get-VisualStudioVersion cmdlet gets information about the installed Visual Studio instances on this machine.
+    The Get-VisualStudioInstance cmdlet gets information about the installed Visual Studio instances on this machine.
 .PARAMETER Name
     Specifies a name that can be used to filter the results.
 .PARAMETER Channel
@@ -453,25 +780,24 @@ function script:IsInModulePaths() {
 .PARAMETER Version
     Specifies a version number that can be used to filter the results.
 .INPUTS
-    None. You cannot pipe objects to Get-VisualStudioVersion.
+    None. You cannot pipe objects to Get-VisualStudioInstance.
 .OUTPUTS
-    VisualStudioInstance. Get-VisualStudioVersion returns a VisualStudioInstance object for each matching instance.
+    VisualStudioInstance. Get-VisualStudioInstance returns a VisualStudioInstance object for each matching instance.
 .EXAMPLE
-    PS> Get-VisualStudioVersion
+    PS> Get-VisualStudioInstance
     Name                                              Channel                    Version      Path
     ----                                              -------                    -------      ----
-    VisualStudio/15.0.0+26228.9.d15rtwsvc             VisualStudio.15.int.d15rel 15.0.26228.9 C:\Program Files (x86)\Microsoft Visual Studio\2017\Enterprise
     Microsoft Visual Studio 14.0                      Release                    14.0         C:\Program Files (x86)\Microsoft Visual Studio 14.0
 .EXAMPLE
-    PS> Get-VisualStudioVersion -Channel Release
+    PS> Get-VisualStudioInstance -Channel Release
     Name                                              Channel                    Version      Path
     ----                                              -------                    -------      ----
     Microsoft Visual Studio 14.0                      Release                    14.0         C:\Program Files (x86)\Microsoft Visual Studio 14.0
 #>
-function Get-VisualStudioVersion([string] $Name, [string] $Channel, [string] $Version) {
+function Get-VisualStudioInstance([string] $Name, [string] $Channel, [string] $Version) {
     script:PopulateVisualStudioVersionsFromCache;
     script:PopulateVisualStudioVersions;
-    $local:Versions = $script:VisualStudioVersions;
+    [VisualStudioInstance[]] $local:Versions = $script:VisualStudioVersions;
     if ($Name) {
         $local:Versions = $local:Versions | Where-Object -Property Name -Like $Name;
     }
@@ -479,7 +805,23 @@ function Get-VisualStudioVersion([string] $Name, [string] $Channel, [string] $Ve
         $local:Versions = $local:Versions | Where-Object -Property Channel -Like $Channel;
     }
     if ($Version) {
-        $local:Versions = $local:Versions | Where-Object -Property Version -Like $Version;
+        [version] $local:ParsedVersion = $null;
+        [int] $local:ParsedInt = 0;
+        if ([version]::TryParse($Version, [ref] $local:ParsedVersion)) {
+            $local:Versions = $local:Versions | Where-Object {
+                if ($_.Major -eq $local:ParsedVersion.Major -and $_.Minor -eq $local:ParsedVersion.Minor) {
+
+                }
+            };
+        }
+        elseif ([int]::TryParse($Version, [ref] $local:ParsedInt)) {
+            $local:Versions = $local:Versions | Where-Object {
+
+            };
+        }
+        else {
+            $local:Versions = $local:Versions | Where-Object -Property Version -Like $Version;
+        }
     }
     $local:Versions;
     script:SaveChanges;
@@ -511,24 +853,31 @@ function Get-VisualStudioVersion([string] $Name, [string] $Channel, [string] $Ve
     Using Development Environment from 'Microsoft Visual Studio 14.0'.
 #>
 function Use-VisualStudioEnvironment {
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName = "Match")]
     param (
         [Parameter(ParameterSetName = "Match")]
         [string] $Name,
         [Parameter(ParameterSetName = "Match")]
         [string] $Channel,
         [Parameter(ParameterSetName = "Match")]
-        [version] $Version,
+        [string] $Version,
+        [Parameter(ParameterSetName = "None")]
+        [switch] $None,
         [Parameter(ParameterSetName = "Pipeline", Position = 0, ValueFromPipeline = $true, Mandatory = $true)]
         [psobject] $InputObject
     );
 
     [void]([Environment]::GetDefault());
+    if ($None) {
+        Reset-VisualStudioEnvironment;
+        return;
+    }
+
     [VisualStudioInstance] $local:Instance = $null;
     if ($InputObject) {
         $local:Instance = [VisualStudioInstance]::FromObject($InputObject);
     } else {
-        $local:Instance = Get-VisualStudioVersion -Name:$Name -Channel:$Channel -Version:$Version | Select-Object -First:1;
+        $local:Instance = Get-VisualStudioInstance -Name:$Name -Channel:$Channel -Version:$Version | Select-Object -First:1;
     }
 
     if ($local:Instance) {
@@ -590,11 +939,11 @@ function Reset-VisualStudioEnvironment([switch] $Force) {
     Resets the cache of installed Visual Studio instances and their respective environment
     settings.
 .INPUTS
-    None. You cannot pipe objects to Reset-VisualStudioVersionCache.
+    None. You cannot pipe objects to Reset-VisualStudioInstanceCache.
 .OUTPUTS
     None.
 #>
-function Reset-VisualStudioVersionCache() {
+function Reset-VisualStudioInstanceCache() {
     $script:VisualStudioVersions = $null;
     if (Test-Path $script:CACHE_PATH) {
         [void](Remove-Item $script:CACHE_PATH -Force);
@@ -615,7 +964,7 @@ function Reset-VisualStudioVersionCache() {
 .PARAMETER Force
     Indicates that "posh-vsdev" should be added to your profile, even if it may already be present.
 .INPUTS
-    None. You cannot pipe objects to Reset-VisualStudioVersionCache.
+    None. You cannot pipe objects to Reset-VisualStudioInstanceCache.
 .OUTPUTS
     None.
 #>
@@ -674,20 +1023,43 @@ function Add-VisualStudioEnvironmentToProfile([switch] $AllHosts, [switch] $UseE
 
 # Reset the environment when the module is removed
 $ExecutionContext.SessionState.Module.OnRemove = {
-    if ($script:VisualStudioVersion) {
-        Reset-VisualStudioEnvironment;
-    }
+    Reset-VisualStudioEnvironment;
 };
+
+# Aliases
+@{
+    # Backwards compatibility
+    "Get-VisualStudioVersion" = "Get-VisualStudioInstance";
+    "Reset-VisualStudioVersionCache" = "Reset-VisualStudioInstanceCache";
+
+    # Shortcuts
+    "Get-VSInstance" = "Get-VisualStudioInstance";
+    "Get-VS" = "Get-VisualStudioInstance";
+    "Use-VSEnvironment" = "Use-VisualStudioEnvironment";
+    "Use-VS" = "Use-VisualStudioEnvironment";
+    "Reset-VSEnvironment" = "Reset-VisualStudioEnvironment";
+    "Reset-VSInstanceCache" = "Reset-VisualStudioInstanceCache";
+}.GetEnumerator() | ForEach-Object { Set-Alias $_.Key $_.Value; };
 
 # Export members
 Export-ModuleMember `
     -Function:(
-        'Get-VisualStudioVersion',
+        'Get-VisualStudioInstance',
         'Use-VisualStudioEnvironment',
         'Reset-VisualStudioEnvironment',
-        'Reset-VisualStudioVersionCache',
+        'Reset-VisualStudioInstanceCache',
         'Add-VisualStudioEnvironmentToProfile'
     ) `
     -Variable:(
         'VisualStudioVersion'
+    ) `
+    -Alias:(
+        'Get-VisualStudioVersion',
+        'Reset-VisualStudioVersionCache',
+        'Get-VSInstance',
+        'Get-VS',
+        'Use-VSEnvironment',
+        'Use-VS',
+        'Reset-VSEnvironment',
+        'Reset-VSInstanceCache'
     );

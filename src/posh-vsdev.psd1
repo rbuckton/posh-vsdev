@@ -3,7 +3,7 @@
     RootModule = 'posh-vsdev.psm1'
 
     # Version number of this module.
-    ModuleVersion = '0.1.1'
+    ModuleVersion = '0.1.2'
 
     # ID used to uniquely identify this module
     GUID = '796b8bb3-07d8-41b0-8394-231f8359c7a6'
@@ -22,10 +22,10 @@
 
     # Functions to export from this module
     FunctionsToExport = @(
-        'Get-VisualStudioVersion',
+        'Get-VisualStudioInstance',
         'Use-VisualStudioEnvironment',
         'Reset-VisualStudioEnvironment',
-        'Reset-VisualStudioVersionCache',
+        'Reset-VisualStudioInstanceCache',
         'Add-VisualStudioEnvironmentToProfile'
     )
 
@@ -38,7 +38,16 @@
     )
 
     # Aliases to export from this module
-    AliasesToExport = @()
+    AliasesToExport = @(
+        'Get-VisualStudioVersion',
+        'Reset-VisualStudioVersionCache',
+        'Get-VSInstance',
+        'Get-VS',
+        'Use-VSEnvironment',
+        'Use-VS',
+        'Reset-VSEnvironment',
+        'Reset-VSInstanceCache'
+    )
 
     # Private data to pass to the module specified in RootModule/ModuleToProcess.
     # This may also contain a PSData hashtable with additional module metadata used by PowerShell.
