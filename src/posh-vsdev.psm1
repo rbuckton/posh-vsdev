@@ -307,218 +307,6 @@ $script:MinorPattern = "(?:\.(?:(?<Minor>[*x])|(?<Minor>\d+)$script:BuildPattern
 $script:MajorPattern = "(?:(?<Major>[*x])|${script:OperatorPattern}v?(?<Major>\d+)$script:MinorPattern)";
 $script:VersionSpecPattern = "^\s*(?:${script:MajorPattern})?\s*$";
 
-enum VersionRangeOperator {
-    None = 0;
-    Or = 1;
-}
-
-enum VersionComparisonOperator {
-    None = 0;
-    Equal = 1;
-    LessThan = 2;
-    GreaterThan = 3;
-    LessThanOrEqual = 4;
-    GreaterThanOrEqual = 5;
-    Tilde = 6;
-    Caret = 7;
-}
-
-class VersionFragment {
-    static [VersionRangeFragment] Range([VersionFragment] $Left, [VersionFragment] $Right) {
-        return [VersionRangeFragment]::new([VersionRangeOperator]::None, $Left, $Right);
-    }
-
-    static [VersionRangeFragment] Or([VersionFragment] $Left, [VersionFragment] $Right) {
-        return [VersionRangeFragment]::new([VersionRangeOperator]::Or, $Left, $Right);
-    }
-
-    static [VersionPrimitiveFragment] Primitive([int] $Major, [int] $Minor, [int] $Build, [int] $Revision) {
-        return VersionPrimitiveFragment::new([VersionComparisonOperator]::None, $Major, $Minor, $Build, $Revision);
-    }
-
-    static [VersionPrimitiveFragment] EQ([int] $Major, [int] $Minor, [int] $Build, [int] $Revision) {
-        return VersionPrimitiveFragment::new([VersionComparisonOperator]::Equal, $Major, $Minor, $Build, $Revision);
-    }
-
-    static [VersionPrimitiveFragment] LT([int] $Major, [int] $Minor, [int] $Build, [int] $Revision) {
-        return VersionPrimitiveFragment::new([VersionComparisonOperator]::LessThan, $Major, $Minor, $Build, $Revision);
-    }
-
-    static [VersionPrimitiveFragment] LE([int] $Major, [int] $Minor, [int] $Build, [int] $Revision) {
-        return VersionPrimitiveFragment::new([VersionComparisonOperator]::LessThanOrEqual, $Major, $Minor, $Build, $Revision);
-    }
-
-    static [VersionPrimitiveFragment] GT([int] $Major, [int] $Minor, [int] $Build, [int] $Revision) {
-        return VersionPrimitiveFragment::new([VersionComparisonOperator]::GreaterThan, $Major, $Minor, $Build, $Revision);
-    }
-
-    static [VersionPrimitiveFragment] GE([int] $Major, [int] $Minor, [int] $Build, [int] $Revision) {
-        return VersionPrimitiveFragment::new([VersionComparisonOperator]::GreaterThanOrEqual, $Major, $Minor, $Build, $Revision);
-    }
-
-    hidden [VersionFragment] Normalize() {
-        return $this;
-    }
-
-    [bool] IsMatch([Version] $Version) {
-        return $false;
-    }
-}
-
-class VersionRangeFragment : VersionFragment {
-    [VersionRangeOperator] $Operator;
-    [VersionFragment] $Left;
-    [VersionFragment] $Right;
-
-    VersionRangeFragment([VersionRangeOperator] $Operator, [VersionFragment] $Left, [VersionFragment] $Right) {
-        $this.Operator = $Operator;
-        $this.Left = $Left;
-        $this.Right = $Right;
-    }
-
-    hidden [VersionFragment] Normalize() {
-        $local:Left = $this.Left.Normalize();
-        $local:Right = $this.Right.Normalize();
-        if ($this.Left -ne $local:Left -or $this.Right -ne $local:Right) {
-            return [VersionRangeFragment]::new($local:Left, $local:Right);
-        }
-        return $this;
-    }
-
-    [bool] IsMatch([Version] $Version) {
-        if ($this.Operator -eq [VersionRangeOperator]::None) {
-            return $this.Left.IsMatch($Version) -and $this.Right.IsMatch($Version);
-        }
-        else {
-            return $this.Left.IsMatch($Version) -or $this.Right.IsMatch($Version);
-        }
-    }
-
-    [string] ToString() {
-        if ($this.Operator -eq [VersionRangeOperator]::None) {
-            return "$($this.Left) $($this.Right)";
-        }
-        else {
-            return "$($this.Left) || $($this.Right)";
-        }
-    }
-}
-
-class VersionPrimitiveFragment : VersionFragment {
-    [VersionComparisonOperator] $Operator = [VersionComparisonOperator]::GreaterThanOrEqual;
-    [int] $Major = 0;
-    [int] $Minor = 0;
-    [int] $Build = 0;
-    [int] $Revision = 0;
-
-    hidden VersionPrimitiveFragment([VersionComparisonOperator] $Operator, [int] $Major, [int] $Minor, [int] $Build, [int] $Revision) {
-        $this.Operator = $Operator;
-        $this.Major = $Major;
-        $this.Minor = $Minor;
-        $this.Build = $Build;
-        $this.Revision = $Revision;
-    }
-
-    hidden [VersionFragment] Normalize() {
-        if ($this.Operator -eq [VersionComparisonOperator]::None) {
-            if ($this.Major -eq [VersionSpec]::VERSION_FRAGMENT_STAR -or
-                $this.Major -eq [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED) {
-                return [VersionPrimitiveFragment]::GE(0, 0, 0, 0);
-            }
-            if ($this.Minor -eq [VersionSpec]::VERSION_FRAGMENT_STAR -or
-                $this.Minor -eq [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED) {
-                return [VersionFragment]::Range(
-                    [VersionFragment]::GE($this.Major, 0, 0, 0),
-                    [VersionFragment]::LT($this.Major + 1, 0, 0, 0)
-                );
-            }
-            if ($this.Build -eq [VersionSpec]::VERSION_FRAGMENT_STAR -or
-                $this.Build -eq [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED) {
-                return [VersionFragment]::Range(
-                    [VersionFragment]::GE($this.Major, $this.Minor, 0, 0),
-                    [VersionFragment]::LT($this.Major, $this.Minor + 1, 0, 0)
-                );
-            }
-            if ($this.Revision -eq [VersionSpec]::VERSION_FRAGMENT_STAR -or
-                $this.Revision -eq [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED) {
-                return [VersionFragment]::Range(
-                    [VersionFragment]::GE($this.Major, $this.Minor, $this.Build, 0),
-                    [VersionFragment]::LT($this.Major, $this.Minor, $this.Build + 1, 0)
-                );
-            }
-        }
-        elseif ($this.Operator -eq [VersionComparisonOperator]::Tilde) {
-            if ($this.Revision -ne [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED) {
-                return [VersionFragment]::Range(
-                    [VersionFragment]::GE($this.Major, $this.Minor, $this.Build, $this.Revision),
-                    [VersionFragment]::LT($this.Major, $this.Minor, $this.Build + 1, 0)
-                );
-            }
-            if ($this.Build -ne [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED) {
-                return [VersionFragment]::Range(
-                    [VersionFragment]::GE($this.Major, $this.Minor, $this.Build, 0),
-                    [VersionFragment]::LT($this.Major, $this.Minor + 1, 0, 0)
-                );
-            }
-            if ($this.Minor -ne [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED) {
-                return [VersionFragment]::Range(
-                    [VersionFragment]::GE($this.Major, $this.Minor, 0, 0),
-                    [VersionFragment]::LT($this.Major + 1, 0, 0, 0)
-                );
-            }
-        }
-        elseif ($this.Operator -eq [VersionComparisonOperator]::Caret) {
-            if ($this.Major -gt 0) {
-                return [VersionFragment]::Range(
-                    [VersionFragment]::GE($this.Major, [Math]::Max(0, $this.Minor), [Math]::Max($this.Build, 0), [Math]::Max($this.Revision, 0)),
-                    [VersionFragment]::LT($this.Major + 1, 0, 0, 0)
-                );
-            }
-            if ($this.Minor -gt 0) {
-                return [VersionFragment]::Range(
-                    [VersionFragment]::GE(0, $this.Minor, [Math]::Max($this.Build, 0), [Math]::Max($this.Revision, 0)),
-                    [VersionFragment]::LT(0, $this.Minor + 1, 0, 0)
-                );
-            }
-            if ($this.Minor -lt 0) {
-                return [VersionFragment]::Range(
-                    [VersionFragment]::GE(0, 0, 0, 0),
-                    [VersionFragment]::LT(1, 0, 0, 0)
-                );
-            }
-            if ($this.Build -gt 0) {
-                return [VersionFragment]::Range(
-                    [VersionFragment]::GE(0, 0, $this.Build, [Math]::Max($this.Revision, 0)),
-                    [VersionFragment]::LT(0, 0, $this.Build + 1, 0)
-                );
-            }
-            if ($this.Build -lt 0) {
-                return [VersionFragment]::Range(
-                    [VersionFragment]::GE(0, 0, 0, 0),
-                    [VersionFragment]::LT(0, 1, 0, 0)
-                );
-            }
-            if ($this.Revision -gt 0) {
-                return [VersionFragment]::Range(
-                    [VersionFragment]::GE(0, 0, 0, $this.Revision),
-                    [VersionFragment]::LT(0, 0, 0, $this.Revision + 1)
-                );
-            }
-            if ($this.Revision -lt 0) {
-                return [VersionFragment]::Range(
-                    [VersionFragment]::GE(0, 0, 0, 0),
-                    [VersionFragment]::LT(0, 0, 1, 0)
-                );
-            }
-        }
-        return $this;
-    }
-
-    [bool] IsMatch([Version] $Version) {
-        return $false;
-    }
-}
-
 class VersionSpec {
     hidden static $VERSION_FRAGMENT_UNSPECIFIED = -1;
     hidden static $VERSION_FRAGMENT_STAR = -2;
@@ -533,70 +321,351 @@ class VersionSpec {
         "^"  = [VersionComparisonOperator]::Caret;
     };
 
-    hidden [VersionFragment] $Spec;
+    static [bool] TryParse([string] $Text, [ref] $Value) {
 
-    static [bool] TryParse([string] $Text, [ref[VersionSpec]] $Value) {
-        $Value = $null;
-        return $false;
-    }
+        function TryParseLogicalOr([string] $Text, [ref] $Value) {
+            $Text = $Text.Trim();
+            [int] $local:End = $Text.IndexOf('||');
+            if ($local:End -eq 0) {
+                $Value.Value = $null;
+                return $false;
+            }
 
-    hidden static [bool] TryParsePrimitive([string] $Text, [ref[VersionPrimitiveFragment]] $Value) {
-        [int] $local:Major = [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED;
-        [int] $local:Minor = [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED;
-        [int] $local:Build = [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED;
-        [int] $local:Revision = [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED;
-        if (-not $Text -imatch $script:VersionSpecPattern -or
-            -not ([VersionSpec]::TryParseXr($Matches.Major, [ref]$local:Major)) -or
-            -not ([VersionSpec]::TryParseXr($Matches.Minor, [ref]$local:Minor)) -or
-            -not ([VersionSpec]::TryParseXr($Matches.Build, [ref]$local:Build)) -or
-            -not ([VersionSpec]::TryParseXr($Matches.Revision, [ref]$local:Revision))) {
-            $Value = $null;
+            if ($local:End -eq -1) {
+                return TryParseRange $Text $Value;
+            }
+
+            $local:Left = $null;
+            $local:Right = $null;
+            if (-not (TryParseRange $Text.Substring(0, $End) ([ref]$local:Left)) -or
+                -not (TryParseLogicalOr $Text.Substring($End + 2) ([ref]$local:Right))) {
+                $Value.Value = $null;
+                return $false;
+            }
+
+
+            $Value.Value = [VersionSpec]::Or($local:Left, $local:Right);
+            return $true;
+        }
+
+        function TryParseRange([string] $Text, [ref] $Value) {
+            $Text = $Text.Trim();
+            [int] $local:End = $Text.IndexOf(' ');
+            if ($local:End -eq -1) {
+                return TryParsePrimitive $Text $Value;
+            }
+
+            $local:Left = $null;
+            $local:Right = $null;
+            if (-not (TryParsePrimitive $Text.Substring(0, $End) ([ref]$local:Left)) -or
+                -not (TryParseRange $Text.Substring($End + 1) ([ref]$local:Right))) {
+                $Value.Value = $null;
+                return $false;
+            }
+
+
+            $Value.Value = [VersionSpec]::Range($local:Left, $local:Right);
+            return $true;
+        }
+
+        function TryParsePrimitive([string] $Text, [ref] $Value) {
+            [int] $local:Major = [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED;
+            [int] $local:Minor = [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED;
+            [int] $local:Build = [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED;
+            [int] $local:Revision = [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED;
+            if (-not ($Text -match $script:VersionSpecPattern) -or
+                -not (TryParseXOrNumber $Matches.Major ([ref]$local:Major)) -or
+                -not (TryParseXOrNumber $Matches.Minor ([ref]$local:Minor)) -or
+                -not (TryParseXOrNumber $Matches.Build ([ref]$local:Build)) -or
+                -not (TryParseXOrNumber $Matches.Revision ([ref]$local:Revision)) -or (
+                    $Matches.Operator -and (
+                        $local:Major -eq [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED -or
+                        $local:Major -eq [VersionSpec]::VERSION_FRAGMENT_STAR -or
+                        $local:Minor -eq [VersionSpec]::VERSION_FRAGMENT_STAR -or
+                        $local:Build -eq [VersionSpec]::VERSION_FRAGMENT_STAR -or
+                        $local:Revision -eq [VersionSpec]::VERSION_FRAGMENT_STAR))) {
+                $Value.Value = $null;
+                return $false;
+            }
+            [VersionComparisonOperator] $local:Operator = [VersionSpec]::VERSION_OPERATORS[$Matches.Operator -as [string]];
+            $Value.Value = [VersionPrimitive]::new($local:Operator, $local:Major, $local:Minor, $local:Build, $local:Revision);
+            return $true;
+        }
+
+        function TryParseXOrNumber([string] $Text, [ref] $Value) {
+            if ($Text.Length -eq 0) {
+                $Value.Value = [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED;
+                return $true;
+            }
+            if ($Text.Length -eq 1 -and ($Text -eq '*' -or $Text -eq 'x' -or $Text -eq 'X')) {
+                $Value.Value = [VersionSpec]::VERSION_FRAGMENT_STAR;
+                return $true;
+            }
+            if ([int]::TryParse($Text, $Value) -and $Value.Value -ge 0) {
+                return $true;
+            }
+            $Value.Value = 0;
             return $false;
         }
 
-        [VersionComparisonOperator] $local:Operator = [VersionSpec]::VERSION_OPERATORS[$Matches.Operator];
-        if ($local:Operator -ne [VersionComparisonOperator]::None) {
-            if ($local:Major -eq [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED -or
-                $local:Major -eq [VersionSpec]::VERSION_FRAGMENT_STAR -or
-                $local:Minor -eq [VersionSpec]::VERSION_FRAGMENT_STAR -or
-                $local:Build -eq [VersionSpec]::VERSION_FRAGMENT_STAR -or
-                $local:Revision -eq [VersionSpec]::VERSION_FRAGMENT_STAR) {
-                $Value = $null;
-                return $false;
-            }
-        }
-
-        $Value = [VersionPrimitiveFragment]::new();
-        $Value.Operator = $local:Operator;
-        $Value.Major = $local:Major;
-        $Value.Minor = $local:Minor;
-        $Value.Build = $local:Build;
-        $Value.Revision = $local:Revision;
-        return $true;
-    }
-
-    hidden static [bool] TryParseXr([string] $Text, [ref[int]] $Value) {
-        if ($Text.Length -eq 0) {
-            $Value = [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED;
+        if (TryParseLogicalOr $Text $Value) {
+            $Value.Value = $Value.Value.Normalize();
             return $true;
         }
-        if ($Text.Length -eq 1 -and ($Text -eq '*' -or $Text -eq 'x' -or $Text -eq 'X')) {
-            $Value = [VersionSpec]::VERSION_FRAGMENT_STAR;
-            return $true;
-        }
-        if ([int]::TryParse($Text, [ref] $Value) -and $Value -ge 0) {
-            return $true;
-        }
-        $Value = 0;
         return $false;
     }
 
-    [bool] IsMatch([version] $Version) {
-        return $this.Spec.IsMatch($Version);
+    static [VersionRange] Range([VersionSpec] $Left, [VersionSpec] $Right) { return [VersionRange]::new([VersionRangeOperator]::Range, $Left, $Right); }
+    static [VersionRange] Or([VersionSpec] $Left, [VersionSpec] $Right) { return [VersionRange]::new([VersionRangeOperator]::Or, $Left, $Right); }
+    static [VersionPrimitive] Primitive([int] $Major, [int] $Minor, [int] $Build, [int] $Revision) { return [VersionPrimitive]::new([VersionComparisonOperator]::None, $Major, $Minor, $Build, $Revision); }
+    static [VersionPrimitive] EQ([int] $Major, [int] $Minor, [int] $Build, [int] $Revision) { return [VersionPrimitive]::new([VersionComparisonOperator]::Equal, $Major, $Minor, $Build, $Revision); }
+    static [VersionPrimitive] LT([int] $Major, [int] $Minor, [int] $Build, [int] $Revision) { return [VersionPrimitive]::new([VersionComparisonOperator]::LessThan, $Major, $Minor, $Build, $Revision); }
+    static [VersionPrimitive] LE([int] $Major, [int] $Minor, [int] $Build, [int] $Revision) { return [VersionPrimitive]::new([VersionComparisonOperator]::LessThanOrEqual, $Major, $Minor, $Build, $Revision); }
+    static [VersionPrimitive] GT([int] $Major, [int] $Minor, [int] $Build, [int] $Revision) { return [VersionPrimitive]::new([VersionComparisonOperator]::GreaterThan, $Major, $Minor, $Build, $Revision); }
+    static [VersionPrimitive] GE([int] $Major, [int] $Minor, [int] $Build, [int] $Revision) { return [VersionPrimitive]::new([VersionComparisonOperator]::GreaterThanOrEqual, $Major, $Minor, $Build, $Revision); }
+    [VersionSpec] Normalize() { return $this; }
+    [bool] IsMatch([Version] $Version) { return $false; }
+}
+
+enum VersionRangeOperator {
+    Range = 0;
+    Or = 1;
+}
+
+class VersionRange : VersionSpec {
+    [VersionRangeOperator] $Operator;
+    [VersionSpec] $Left;
+    [VersionSpec] $Right;
+
+    VersionRange([VersionRangeOperator] $Operator, [VersionSpec] $Left, [VersionSpec] $Right) {
+        $this.Operator = $Operator;
+        $this.Left = $Left;
+        $this.Right = $Right;
+    }
+
+    [VersionSpec] Normalize() {
+        $local:Left = $this.Left.Normalize();
+        $local:Right = $this.Right.Normalize();
+        if ($this.Left -ne $local:Left -or $this.Right -ne $local:Right) {
+            return [VersionRange]::new($this.Operator, $local:Left, $local:Right);
+        }
+        return $this;
+    }
+
+    [bool] IsMatch([Version] $Version) {
+        if ($this.Operator -eq [VersionRangeOperator]::Range) {
+            return $this.Left.IsMatch($Version) -and $this.Right.IsMatch($Version);
+        }
+        else {
+            return $this.Left.IsMatch($Version) -or $this.Right.IsMatch($Version);
+        }
     }
 
     [string] ToString() {
-        return $this.Spec.ToString();
+        if ($this.Operator -eq [VersionRangeOperator]::Range) {
+            return "$($this.Left) $($this.Right)";
+        }
+        else {
+            return "$($this.Left) || $($this.Right)";
+        }
+    }
+}
+
+enum VersionComparisonOperator {
+    None = 0;
+    Equal = 1;
+    LessThan = 2;
+    GreaterThan = 3;
+    LessThanOrEqual = 4;
+    GreaterThanOrEqual = 5;
+    Tilde = 6;
+    Caret = 7;
+}
+
+class VersionPrimitive : VersionSpec {
+    [VersionComparisonOperator] $Operator = [VersionComparisonOperator]::GreaterThanOrEqual;
+    [int] $Major = 0;
+    [int] $Minor = 0;
+    [int] $Build = 0;
+    [int] $Revision = 0;
+
+    VersionPrimitive([VersionComparisonOperator] $Operator, [int] $Major, [int] $Minor, [int] $Build, [int] $Revision) {
+        $this.Operator = $Operator;
+        $this.Major = $Major;
+        $this.Minor = $Minor;
+        $this.Build = $Build;
+        $this.Revision = $Revision;
+    }
+
+    [VersionSpec] Normalize() {
+        if ($this.Operator -eq [VersionComparisonOperator]::None) {
+            if ($this.Major -eq [VersionSpec]::VERSION_FRAGMENT_STAR -or
+                $this.Major -eq [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED) {
+                return [VersionPrimitive]::GE(0, 0, 0, 0);
+            }
+            if ($this.Minor -eq [VersionSpec]::VERSION_FRAGMENT_STAR -or
+                $this.Minor -eq [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED) {
+                return [VersionSpec]::Range(
+                    [VersionSpec]::GE($this.Major, 0, 0, 0),
+                    [VersionSpec]::LT($this.Major + 1, 0, 0, 0)
+                );
+            }
+            if ($this.Build -eq [VersionSpec]::VERSION_FRAGMENT_STAR -or
+                $this.Build -eq [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED) {
+                return [VersionSpec]::Range(
+                    [VersionSpec]::GE($this.Major, $this.Minor, 0, 0),
+                    [VersionSpec]::LT($this.Major, $this.Minor + 1, 0, 0)
+                );
+            }
+            if ($this.Revision -eq [VersionSpec]::VERSION_FRAGMENT_STAR -or
+                $this.Revision -eq [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED) {
+                return [VersionSpec]::Range(
+                    [VersionSpec]::GE($this.Major, $this.Minor, $this.Build, 0),
+                    [VersionSpec]::LT($this.Major, $this.Minor, $this.Build + 1, 0)
+                );
+            }
+            return [VersionSpec]::EQ($this.Major, $this.Minor, $this.Build, $this.Revision);
+        }
+        elseif ($this.Operator -eq [VersionComparisonOperator]::Tilde) {
+            if ($this.Revision -ne [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED) {
+                return [VersionSpec]::Range(
+                    [VersionSpec]::GE($this.Major, $this.Minor, $this.Build, $this.Revision),
+                    [VersionSpec]::LT($this.Major, $this.Minor, $this.Build + 1, 0)
+                );
+            }
+            if ($this.Build -ne [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED) {
+                return [VersionSpec]::Range(
+                    [VersionSpec]::GE($this.Major, $this.Minor, $this.Build, 0),
+                    [VersionSpec]::LT($this.Major, $this.Minor + 1, 0, 0)
+                );
+            }
+            if ($this.Minor -ne [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED) {
+                return [VersionSpec]::Range(
+                    [VersionSpec]::GE($this.Major, $this.Minor, 0, 0),
+                    [VersionSpec]::LT($this.Major + 1, 0, 0, 0)
+                );
+            }
+        }
+        elseif ($this.Operator -eq [VersionComparisonOperator]::Caret) {
+            if ($this.Major -gt 0) {
+                return [VersionSpec]::Range(
+                    [VersionSpec]::GE($this.Major, [Math]::Max(0, $this.Minor), [Math]::Max($this.Build, 0), [Math]::Max($this.Revision, 0)),
+                    [VersionSpec]::LT($this.Major + 1, 0, 0, 0)
+                );
+            }
+            if ($this.Minor -gt 0) {
+                return [VersionSpec]::Range(
+                    [VersionSpec]::GE(0, $this.Minor, [Math]::Max($this.Build, 0), [Math]::Max($this.Revision, 0)),
+                    [VersionSpec]::LT(0, $this.Minor + 1, 0, 0)
+                );
+            }
+            if ($this.Minor -lt 0) {
+                return [VersionSpec]::Range(
+                    [VersionSpec]::GE(0, 0, 0, 0),
+                    [VersionSpec]::LT(1, 0, 0, 0)
+                );
+            }
+            if ($this.Build -gt 0) {
+                return [VersionSpec]::Range(
+                    [VersionSpec]::GE(0, 0, $this.Build, [Math]::Max($this.Revision, 0)),
+                    [VersionSpec]::LT(0, 0, $this.Build + 1, 0)
+                );
+            }
+            if ($this.Build -lt 0) {
+                return [VersionSpec]::Range(
+                    [VersionSpec]::GE(0, 0, 0, 0),
+                    [VersionSpec]::LT(0, 1, 0, 0)
+                );
+            }
+            if ($this.Revision -gt 0) {
+                return [VersionSpec]::Range(
+                    [VersionSpec]::GE(0, 0, 0, $this.Revision),
+                    [VersionSpec]::LT(0, 0, 0, $this.Revision + 1)
+                );
+            }
+            if ($this.Revision -lt 0) {
+                return [VersionSpec]::Range(
+                    [VersionSpec]::GE(0, 0, 0, 0),
+                    [VersionSpec]::LT(0, 0, 1, 0)
+                );
+            }
+        }
+        return $this.Update(
+            [Math]::Max(0, $this.Major),
+            [Math]::Max(0, $this.Minor),
+            [Math]::Max(0, $this.Build),
+            [Math]::Max(0, $this.Revision)
+        );
+    }
+
+    [VersionPrimitive] Update([int] $Major, [int] $Minor, [int] $Build, [int] $Revision) {
+        if ($this.Major -ne $Major -or
+            $this.Minor -ne $Minor -or
+            $this.Build -ne $Build -or
+            $this.Revision -ne $Revision) {
+            return [VersionPrimitive]::new($this.Operator, $this.Major, $this.Minor, $this.Build, $this.Revision);
+        }
+        return $this;
+    }
+
+    [bool] IsMatch([Version] $Version) {
+        [version] $local:NormalThis = [version]::new($this.Major, $this.Minor, $this.Build, $this.Revision);
+        [version] $local:NormalVersion = [version]::new($Version.Major, $Version.Minor, [Math]::Max(0, $Version.Build), [Math]::Max(0, $Version.Revision));
+        [int] $local:Result = $local:NormalVersion.CompareTo($local:NormalThis);
+        switch ($this.Operator) {
+            Equal { return $local:Result -eq 0; }
+            LessThan { return $local:Result -lt 0; }
+            LessThanOrEqual { return $local:Result -le 0; }
+            GreaterThan { return $local:Result -gt 0; }
+            GreaterThanOrEqual { return $local:Result -ge 0; }
+        }
+        throw "How did we get here! $($this.Operator)";
+    }
+
+    [string] ToString() {
+        [string] $local:Text = switch ($this.Operator) {
+            Equal { "=" }
+            LessThan { "<" }
+            LessThanOrEqual { "<=" }
+            GreaterThan { ">" }
+            GreaterThanOrEqual { ">=" }
+            Tilde { "~" }
+            Caret { "^"}
+            default { "" }
+        };
+        if ($this.Major -eq [VersionSpec]::VERSION_FRAGMENT_STAR -or
+            $this.Major -eq [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED) {
+            return $local:Text + "*";
+        }
+        $local:Text += $this.Major -as [string];
+
+        if ($this.Minor -eq [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED) {
+            return $local:Text;
+        }
+        $local:Text += ".";
+        if ($this.Minor -eq [VersionSpec]::VERSION_FRAGMENT_STAR) {
+            return $local:Text + "*";
+        }
+        $local:Text += $this.Minor -as [string];
+
+        if ($this.Build -eq [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED) {
+            return $local:Text;
+        }
+        $local:Text += ".";
+        if ($this.Build -eq [VersionSpec]::VERSION_FRAGMENT_STAR) {
+            return $local:Text + "*";
+        }
+        $local:Text += $this.Build -as [string];
+
+        if ($this.Revision -eq [VersionSpec]::VERSION_FRAGMENT_UNSPECIFIED) {
+            return $local:Text;
+        }
+        $local:Text += ".";
+        if ($this.Revision -eq [VersionSpec]::VERSION_FRAGMENT_STAR) {
+            return $local:Text + "*";
+        }
+        $local:Text += $this.Revision -as [string];
+        return $local:Text;
     }
 }
 
@@ -805,22 +874,12 @@ function Get-VisualStudioInstance([string] $Name, [string] $Channel, [string] $V
         $local:Versions = $local:Versions | Where-Object -Property Channel -Like $Channel;
     }
     if ($Version) {
-        [version] $local:ParsedVersion = $null;
-        [int] $local:ParsedInt = 0;
-        if ([version]::TryParse($Version, [ref] $local:ParsedVersion)) {
-            $local:Versions = $local:Versions | Where-Object {
-                if ($_.Major -eq $local:ParsedVersion.Major -and $_.Minor -eq $local:ParsedVersion.Minor) {
-
-                }
-            };
-        }
-        elseif ([int]::TryParse($Version, [ref] $local:ParsedInt)) {
-            $local:Versions = $local:Versions | Where-Object {
-
-            };
+        $local:VersionSpec = $null;
+        if ([VersionSpec]::TryParse($Version, [ref]$local:VersionSpec)) {
+            $local:Versions = $local:Versions | Where-Object { return $local:VersionSpec.IsMatch($_.Version); };
         }
         else {
-            $local:Versions = $local:Versions | Where-Object -Property Version -Like $Version;
+            throw [System.FormatException]::new();
         }
     }
     $local:Versions;
