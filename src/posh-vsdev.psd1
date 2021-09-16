@@ -3,7 +3,7 @@
     RootModule = 'posh-vsdev.psm1'
 
     # Version number of this module.
-    ModuleVersion = '0.1.3'
+    ModuleVersion = '0.2.0'
 
     # ID used to uniquely identify this module
     GUID = '796b8bb3-07d8-41b0-8394-231f8359c7a6'
