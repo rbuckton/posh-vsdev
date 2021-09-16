@@ -3,7 +3,7 @@
     RootModule = 'posh-vsdev.psm1'
 
     # Version number of this module.
-    ModuleVersion = '0.1.2'
+    ModuleVersion = '0.1.3'
 
     # ID used to uniquely identify this module
     GUID = '796b8bb3-07d8-41b0-8394-231f8359c7a6'
@@ -12,7 +12,7 @@
     Author = 'Ron Buckton'
 
     # Copyright statement for this module
-    Copyright = '(c) 2017 Ron Buckton'
+    Copyright = '(c) 2021 Ron Buckton'
 
     # Description of the functionality provided by this module
     Description = 'Sets up the Visual Studio Developmer Command Prompt environment in Powershell.'
@@ -26,7 +26,8 @@
         'Use-VisualStudioEnvironment',
         'Reset-VisualStudioEnvironment',
         'Reset-VisualStudioInstanceCache',
-        'Add-VisualStudioEnvironmentToProfile'
+        'Add-VisualStudioEnvironmentToProfile',
+        'Get-WindowsSdk'
     )
 
     # Cmdlets to export from this module
