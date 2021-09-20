@@ -1,7 +1,8 @@
 param ([string]$NugetApiKey);
 
 $Module = @{
-    Path = (Resolve-Path "$PSScriptRoot/src").Path
+    Name = "posh-vsdev"
+    RequiredVersion = "0.2.1"
     NugetApiKey = $NugetApiKey
 };
 

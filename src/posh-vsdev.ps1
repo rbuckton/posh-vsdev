@@ -463,7 +463,7 @@ class WindowsSdk {
             [WindowsSdk[]] $local:Sdks = @();
 
             foreach ($local:RegRoot in $local:RegRoots) {
-                [psobject[]] $local:VersionRegKeys = Get-ChildItem "$RegRoot\Microsoft\Microsoft SDKs\Windows" -ErrorAction SilentlyContinue;
+                [psobject[]] $local:VersionRegKeys = Get-ChildItem "$RegRoot\Microsoft\Microsoft SDKs\Windows" -ErrorAction Ignore;
                 foreach ($local:RegKey in $local:VersionRegKeys) {
                     [string] $local:VersionKey = $local:RegKey.PSChildName;
                     if ($local:VersionKey -notmatch "^v\d+\.\d+$") {
